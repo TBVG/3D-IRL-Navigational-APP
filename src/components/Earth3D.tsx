@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect, useMemo, Suspense } from 'react';
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import { OrbitControls, Stars, Line } from '@react-three/drei';
 import * as THREE from 'three';
@@ -16,6 +16,8 @@ interface Earth3DProps {
 const Earth3D: React.FC<Earth3DProps> = ({ position, onPositionChange, visible }) => {
   const { routePath, currentLocation, destination, isNavigating } = useNavigation();
   const { toast } = useToast();
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [hasError, setHasError] = React.useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -27,40 +29,78 @@ const Earth3D: React.FC<Earth3DProps> = ({ position, onPositionChange, visible }
     return null;
   }
 
+  if (hasError) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-gray-900 text-white">
+        <div className="text-center p-5 max-w-md">
+          <h2 className="text-xl font-bold mb-3">3D View Error</h2>
+          <p>There was an error loading the 3D view. Please try refreshing the page.</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Refresh Page
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full">
-      <Canvas
-        camera={{ 
-          position: [0, 0, 5], 
-          fov: 45,
-          near: 0.1,
-          far: 1000
-        }}
-        style={{ background: '#000814' }}
-        onCreated={() => {
-          console.log("Three.js canvas created successfully");
-        }}
-      >
-        <EarthSphere 
-          position={position} 
-          onPositionChange={onPositionChange}
-          routePath={routePath}
-          currentLocation={currentLocation}
-          destination={destination}
-          isNavigating={isNavigating}
-        />
-        <OrbitControls 
-          enablePan={true}
-          enableZoom={true}
-          enableRotate={true}
-          minDistance={2.5}
-          maxDistance={10}
-        />
-        <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
-        <ambientLight intensity={0.3} />
-        <directionalLight position={[5, 3, 5]} intensity={0.8} />
-        {import.meta.env.DEV && <StatsWrapper />}
-      </Canvas>
+      <Suspense fallback={
+        <div className="w-full h-full flex items-center justify-center bg-gray-900 text-white">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
+            <p>Loading 3D View...</p>
+          </div>
+        </div>
+      }>
+        <Canvas
+          camera={{ 
+            position: [0, 0, 5], 
+            fov: 45,
+            near: 0.1,
+            far: 1000
+          }}
+          style={{ background: '#000814' }}
+          onCreated={() => {
+            console.log("Three.js canvas created successfully");
+            setIsLoading(false);
+          }}
+          onError={(error) => {
+            console.error("Three.js error:", error);
+            setHasError(true);
+            toast({
+              title: "3D View Error",
+              description: "An error occurred while rendering the 3D view.",
+              variant: "destructive",
+            });
+          }}
+        >
+          <ErrorBoundary>
+            <EarthSphere 
+              position={position} 
+              onPositionChange={onPositionChange}
+              routePath={routePath}
+              currentLocation={currentLocation}
+              destination={destination}
+              isNavigating={isNavigating}
+            />
+            <OrbitControls 
+              enablePan={true}
+              enableZoom={true}
+              enableRotate={true}
+              minDistance={2.5}
+              maxDistance={10}
+            />
+            <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
+            <ambientLight intensity={0.3} />
+            <directionalLight position={[5, 3, 5]} intensity={0.8} />
+            {import.meta.env.DEV && <StatsWrapper />}
+          </ErrorBoundary>
+        </Canvas>
+      </Suspense>
 
       <div className="absolute bottom-4 right-4 z-10 flex flex-col space-y-2">
         <button 
@@ -107,6 +147,37 @@ const Earth3D: React.FC<Earth3DProps> = ({ position, onPositionChange, visible }
   );
 };
 
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('3D View Error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <mesh>
+          <sphereGeometry args={[2, 32, 32]} />
+          <meshBasicMaterial color="red" />
+        </mesh>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 interface EarthSphereProps {
   position: MapPosition;
   onPositionChange: (position: Partial<MapPosition>) => void;
@@ -127,18 +198,44 @@ const EarthSphere: React.FC<EarthSphereProps> = ({
   const cloudRef = useRef<THREE.Mesh>(null);
   const routeRef = useRef<THREE.Line | null>(null);
   
-  const earthTexture = useLoader(THREE.TextureLoader, '/earth-texture.jpg', 
-    undefined,
-    (error) => console.error('Failed to load earth texture:', error)
-  );
-  const earthBumpMap = useLoader(THREE.TextureLoader, '/earth-bump.jpg', 
-    undefined,
-    (error) => console.error('Failed to load earth bump texture:', error)
-  );
-  const cloudsTexture = useLoader(THREE.TextureLoader, '/earth-clouds.png', 
-    undefined,
-    (error) => console.error('Failed to load clouds texture:', error)
-  );
+  const textures = useMemo(() => {
+    const textureLoader = new THREE.TextureLoader();
+    
+    // Load textures with error handling
+    const loadTexture = (path: string, name: string) => {
+      return new Promise<THREE.Texture>((resolve, reject) => {
+        textureLoader.load(
+          path,
+          (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+            resolve(texture);
+          },
+          undefined,
+          (error) => {
+            console.error(`Failed to load ${name}:`, error);
+            reject(error);
+          }
+        );
+      });
+    };
+
+    // Use default textures if custom ones fail to load
+    const defaultTexture = new THREE.Texture();
+    defaultTexture.colorSpace = THREE.SRGBColorSpace;
+    defaultTexture.minFilter = THREE.LinearFilter;
+    defaultTexture.magFilter = THREE.LinearFilter;
+
+    return {
+      earthTexture: loadTexture('/textures/earth-texture.jpg', 'earth texture')
+        .catch(() => defaultTexture),
+      earthBumpMap: loadTexture('/textures/earth-bump.jpg', 'earth bump map')
+        .catch(() => defaultTexture),
+      cloudsTexture: loadTexture('/textures/earth-clouds.png', 'clouds texture')
+        .catch(() => defaultTexture)
+    };
+  }, []);
   
   const { camera } = useThree();
   
@@ -174,6 +271,17 @@ const EarthSphere: React.FC<EarthSphereProps> = ({
       material.opacity = 0.7 + 0.3 * pulseFactor;
     }
   });
+
+  // Cleanup textures on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(textures).forEach(texture => {
+        if (texture) {
+          texture.dispose();
+        }
+      });
+    };
+  }, [textures]);
 
   const latLongToVector3 = (lat: number, long: number, radius: number): THREE.Vector3 => {
     const phi = (90 - lat) * (Math.PI / 180);
@@ -291,8 +399,8 @@ const EarthSphere: React.FC<EarthSphereProps> = ({
       <mesh ref={earthRef}>
         <sphereGeometry args={[2, 64, 64]} />
         <meshStandardMaterial 
-          map={earthTexture}
-          bumpMap={earthBumpMap}
+          map={textures.earthTexture}
+          bumpMap={textures.earthBumpMap}
           bumpScale={0.1}
           metalness={0.1}
           roughness={0.7}
@@ -302,7 +410,7 @@ const EarthSphere: React.FC<EarthSphereProps> = ({
       <mesh ref={cloudRef}>
         <sphereGeometry args={[2.05, 64, 64]} />
         <meshStandardMaterial 
-          map={cloudsTexture}
+          map={textures.cloudsTexture}
           transparent={true}
           opacity={0.4}
           depthWrite={false}

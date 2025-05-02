@@ -1,9 +1,16 @@
-
-// This is a shim to provide a default export for use-sync-external-store/shim/with-selector
+// This is a shim to provide the useSyncExternalStoreWithSelector functionality
 // which is required by zustand and other packages
 
-import { useSyncExternalStoreWithSelector } from 'use-sync-external-store/shim/with-selector';
+import { useSyncExternalStore } from 'use-sync-external-store';
 
-// Export the specific function directly as the default export
-// This ensures that when code tries to import the default, it gets the correct implementation
+export function useSyncExternalStoreWithSelector(
+  subscribe,
+  getSnapshot,
+  selector,
+  isEqual
+) {
+  const getSelection = () => selector(getSnapshot());
+  return useSyncExternalStore(subscribe, getSelection, getSelection);
+}
+
 export default useSyncExternalStoreWithSelector;

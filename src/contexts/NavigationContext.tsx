@@ -1,4 +1,3 @@
-
 import React, { createContext, useState, useContext, useCallback, useEffect } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import { generateRoutePath, calculateDistance, calculateBearing } from '@/utils/locationUtils';
@@ -8,6 +7,7 @@ interface Location {
   latitude: number;
   longitude: number;
   name?: string;
+  bearing?: number;
 }
 
 interface Waypoint extends Location {

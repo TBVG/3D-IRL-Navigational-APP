@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { useToast } from '@/components/ui/use-toast';
 import { useMapPosition } from '@/hooks/useMapPosition';
@@ -13,129 +12,105 @@ import Earth3D from '@/components/Earth3D';
 
 const Index = () => {
   const { toast } = useToast();
-  const [isGlobeView, setIsGlobeView] = useState(false);
+  const [isGlobeView, setIsGlobeView] = useState(true);
   const { position, flyTo } = useMapPosition();
   const [cesiumFailed, setCesiumFailed] = useState(false);
   const [is3DFallback, setIs3DFallback] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Check if Cesium has loaded properly
-  useEffect(() => {
-    const handleCesiumError = (event: ErrorEvent) => {
-      if (event.message.includes('cesium') || event.message.includes('Cesium')) {
-        console.error('Cesium error detected:', event);
-        setCesiumFailed(true);
-        setIs3DFallback(true);
-        toast({
-          title: 'Error loading 3D view',
-          description: 'Using alternative 3D view instead.',
-          variant: 'destructive',
-        });
-      }
-    };
-
-    window.addEventListener('error', handleCesiumError);
-    
-    // Handle THREE.js related errors too
-    const handleThreeError = (event: ErrorEvent) => {
-      if (event.message.includes('three') || event.message.includes('Three') || 
-          event.message.includes('THREE') || event.message.includes('webgl')) {
-        console.error('Three.js or WebGL error detected:', event);
-        toast({
-          title: '3D rendering issue detected',
-          description: 'Some 3D features may not display correctly.',
-          variant: 'destructive',
-        });
-      }
-    };
-    
-    window.addEventListener('error', handleThreeError);
-    
-    return () => {
-      window.removeEventListener('error', handleCesiumError);
-      window.removeEventListener('error', handleThreeError);
-    };
+  // Handle Cesium initialization errors
+  const handleCesiumError = useCallback(() => {
+    setCesiumFailed(true);
+    setIs3DFallback(true);
+    toast({
+      title: 'Error loading 3D view',
+      description: 'Using alternative 3D view instead.',
+      variant: 'destructive',
+    });
   }, [toast]);
 
-  const handleViewToggle = useCallback((useGlobeView: boolean) => {
-    // If switching to 3D and Cesium failed, use the fallback Earth3D component
-    if (useGlobeView && cesiumFailed) {
-      setIsGlobeView(true);
-      setIs3DFallback(true);
-      toast({
-        title: 'Using alternative 3D view',
-        description: 'The primary 3D Earth view is unavailable.',
-        duration: 3000,
-      });
-      return;
-    }
-    
-    setIsGlobeView(useGlobeView);
-    toast({
-      title: `Switched to ${useGlobeView ? '3D' : '2D'} view`,
-      duration: 1500,
-    });
-  }, [toast, cesiumFailed]);
+  // Handle view toggle
+  const handleViewToggle = useCallback(() => {
+    setIsGlobeView(prev => !prev);
+  }, []);
 
+  // Handle location selection
   const handleLocationSelect = useCallback((location: { latitude: number; longitude: number }) => {
-    flyTo({ 
-      latitude: location.latitude, 
-      longitude: location.longitude, 
-      zoom: 10
+    flyTo({
+      latitude: location.latitude,
+      longitude: location.longitude,
+      zoom: 12
     });
-    toast({
-      title: 'Location updated',
-      description: `Navigating to ${location.latitude.toFixed(2)}, ${location.longitude.toFixed(2)}`,
-      duration: 2000,
-    });
-  }, [flyTo, toast]);
+  }, [flyTo]);
+
+  // Handle loading state
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="w-full h-screen flex items-center justify-center bg-gray-900 text-white">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mb-4"></div>
+          <p>Loading application...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <NavigationProvider>
-      <div className="h-screen w-screen overflow-hidden relative">
-        {/* Main visualization area - ensuring both map and globe have proper size */}
-        <div className="absolute inset-0 w-full h-full">
-          <Map 
-            position={position} 
-            onPositionChange={flyTo} 
-            visible={!isGlobeView} 
-          />
-          
-          {/* Only show Cesium Earth if not using fallback */}
-          <CesiumEarth 
-            position={position} 
-            onPositionChange={flyTo} 
-            visible={isGlobeView && !is3DFallback} 
-          />
-          
-          {/* Use Earth3D as a fallback when Cesium fails */}
-          <Earth3D
-            position={position}
-            onPositionChange={flyTo}
-            visible={isGlobeView && is3DFallback}
-          />
-          
-          <Route visible={true} />
+      <div className="relative w-full h-screen bg-gray-100">
+        {/* Map/Globe View */}
+        <div className="absolute inset-0">
+          {isGlobeView ? (
+            cesiumFailed ? (
+              <Earth3D
+                position={position}
+                onPositionChange={flyTo}
+                visible={true}
+              />
+            ) : (
+              <CesiumEarth
+                position={position}
+                onPositionChange={flyTo}
+                visible={true}
+                onError={handleCesiumError}
+              />
+            )
+          ) : (
+            <Map
+              position={position}
+              onPositionChange={flyTo}
+              visible={true}
+            />
+          )}
         </div>
-        
-        {/* UI overlay - using z-index 50 to ensure it appears above ALL other elements */}
-        <div className="absolute inset-0 pointer-events-none z-50">
-          <Navigation>
-            <div className="pointer-events-auto">
-              <ViewToggle isGlobeView={isGlobeView} onChange={handleViewToggle} />
+
+        {/* UI Overlay */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="container mx-auto px-4 py-4">
+            <div className="flex flex-col space-y-4">
+              <div className="pointer-events-auto">
+                <SearchBar onSelectLocation={handleLocationSelect} />
+              </div>
+              <div className="pointer-events-auto">
+                <ViewToggle isGlobeView={isGlobeView} onToggle={handleViewToggle} />
+              </div>
             </div>
-          </Navigation>
-          
-          <div className="absolute top-24 left-1/2 transform -translate-x-1/2 w-full max-w-xl px-4 pointer-events-auto">
-            <SearchBar onSelectLocation={handleLocationSelect} />
           </div>
           
-          <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 w-full max-w-xl px-4 text-center">
-            <div className="glass-panel rounded-lg py-3 px-4 inline-block animate-slide-up shadow-float">
-              <span className="text-xs uppercase tracking-wider font-medium text-gray-500">Current Location</span>
-              <p className="font-medium">
-                {position.latitude.toFixed(4)}°, {position.longitude.toFixed(4)}°
-              </p>
-            </div>
+          <div className="absolute bottom-4 left-4 right-4 pointer-events-auto">
+            <Navigation />
+          </div>
+          
+          <div className="absolute top-4 right-4 pointer-events-auto">
+            <Route visible={true} />
           </div>
         </div>
       </div>
